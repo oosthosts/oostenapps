@@ -115,6 +115,18 @@
   .footbar{display:flex;align-items:center;gap:8px;padding:4px 16px 80px;}
   .footbar .sw{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:7px;}
   .footbar input{accent-color:var(--accent);width:17px;height:17px;}
+  .recipe-card{padding:10px 12px;}
+  .rc-top{display:flex;align-items:flex-start;gap:10px;}
+  .rc-main{flex:1;min-width:0;cursor:pointer;}
+  .rn{font-weight:bold;font-size:15.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;line-height:1.25;}
+  .rnum{color:var(--muted);font-weight:normal;}
+  .rc-made{color:var(--good);font-size:12px;font-weight:bold;}
+  .rc-ease{margin-left:auto;font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 6px;text-transform:uppercase;font-weight:bold;}
+  .rc-side{display:flex;flex-direction:column;align-items:center;gap:6px;flex:none;}
+  .rc-pri{font-size:12px;border:1px solid var(--border);border-radius:8px;padding:4px 3px;background:var(--panel2);color:var(--text);font-weight:bold;}
+  .rc-made-btn{width:32px;height:32px;border-radius:9px;border:1px solid var(--border);background:var(--panel2);font-size:15px;color:var(--muted);}
+  .rc-made-btn.on{background:var(--good);color:#fff;border-color:transparent;}
+  .recipe-card.rdone{opacity:.68;}
   .toast{position:fixed;left:50%;bottom:calc(20px + var(--safe-bot));transform:translateX(-50%);background:var(--text);color:#fff;padding:11px 16px;border-radius:13px;font-size:13px;z-index:80;box-shadow:0 8px 30px rgba(0,0,0,.3);max-width:92vw;text-align:center;}
   .toast.err{background:var(--danger);}
 </style>
@@ -158,13 +170,14 @@
 
 <script>
 const REQUIRE_PASS = false;
-const EXEC_URL = "https://script.google.com/macros/s/AKfycbyBW1BrA4_T2v5MO1CwGyER_gXhbX89awDwBboYZO2NqXodVhnQ2lPUTZF0z_dF2X42/exec";
+const EXEC_URL = "https://script.google.com/macros/s/AKfycbzJ6gRxuM9ijlgHTrA8bWXQnlmABo8WHAzzn9x2q1NLiDZcQXBpO0uEN3h2833PH-8V/exec";
 const SHOP_CATS = [
   { id:'urgent',    title:'Urgent',           sub:'Buy now',              icon:'🔴' },
-  { id:'recurring', title:'Recurring',        sub:'Subs · fees · policy', icon:'🔁' },
   { id:'future',    title:'Future Purchases', sub:'Planned',              icon:'🛒' },
   { id:'gift',      title:'Gifts',            sub:'For others',           icon:'🎁' },
+  { id:'recurring', title:'Recurring',        sub:'Subs · fees · policy', icon:'🔁' },
 ];
+const GROC_STORES = ["Sam's Club","Costco","Jewel","TJ's","Grocery","Other"];
 const SCMAP = Object.fromEntries(SHOP_CATS.map(c=>[c.id,c]));
 const GROC_SUBS = ['General','Recipe Specific','Produce','Dairy','Pantry','Meat/Protein','Frozen','Snacks','Household'];
 const CADENCES = [['none','One-time'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']];
@@ -226,6 +239,7 @@ function monthlyEq(it){ const a=Number(it.amount||0); if(!a)return 0; if(it.cade
 function ratioOf(p,c,f){ p=parseFloat(p); c=parseFloat(c); f=parseFloat(f); if(!p||p<=0||isNaN(p)) return ''; const fm=x=>isNaN(x)?'?':(Math.round(x*100)/100).toString(); return '1:'+fm(c/p)+':'+fm(f/p); }
 const STAPLES=['cottage cheese','greek yogurt','yogurt','cream cheese','egg white','large egg','eggs','egg,','whey','protein powder','pb fit','peanut butter','almond butter','monk fruit','erythritol','honey','agave','maple','vanilla','almond extract','kodiak','rolled oats','oat flour','oats','almond flour','all-purpose flour','flour','baking powder','baking soda','salt','cream of tartar','ener-g','believe','cocoa','cacao','blueberr','strawberr','raspberr','applesauce','banana','coconut oil','butter','cool whip','ghee','skim milk','almond milk','milk','cinnamon','junket','rennet','pudding','biscoff','rice cake','graham','oreo','corn flake','weetbix','coconut','chia','mozzarella','parmesan','garlic powder','onion powder','italian seasoning','pepper','marinara','ranch','caesar','tahini','collagen','non-stick','nonstick','water','nutmeg','pumpkin pie spice'];
 function isStaple(line){ const l=String(line).toLowerCase(); return STAPLES.some(s=>l.indexOf(s)>=0); }
+function cleanRecipeName(n){ return String(n||'').replace(/\b(healthy|low[- ]?carb|no[- ]?baked?)\b/gi,'').replace(/\[\s*\]/g,'').replace(/\(\s*\)/g,'').replace(/\s{2,}/g,' ').replace(/^[\s,\-–—]+|[\s,\-–—]+$/g,'').trim(); }
 
 /* ===== RENDER ===== */
 function render(){
@@ -240,10 +254,6 @@ function render(){
   renderChips();
 }
 function renderShopping(board){
-  const cc=state.items.filter(i=>i.ccFuture&&!i.purchased);
-  if(cc.length){ const total=cc.reduce((s,i)=>s+Number(i.amount||0),0);
-    board.appendChild(cardEl('card accent', '💳 Future CC Purchases', 'saved for a new card', money(total),
-      cc.map(i=>ccRow(i)))); }
   for(const c of SHOP_CATS){
     let its=state.items.filter(i=>i.category===c.id); if(state.hideDone) its=its.filter(i=>!i.purchased);
     its.sort((a,b)=>(a.purchased-b.purchased)||(b.sort-a.sort));
@@ -252,27 +262,55 @@ function renderShopping(board){
     else { const t=its.filter(i=>!i.purchased).reduce((s,i)=>s+Number(i.amount||0),0); if(t)tot=money(t); }
     board.appendChild(cardEl('card', c.icon+' '+c.title, c.sub, tot, its.length?its.map(itemRow):[emptyEl()]));
   }
+  const cc=state.items.filter(i=>i.ccFuture&&!i.purchased);
+  if(cc.length){ const total=cc.reduce((s,i)=>s+Number(i.amount||0),0);
+    board.appendChild(cardEl('card accent', '💳 Future CC Purchases', 'reference — saved for a new card', money(total),
+      cc.map(i=>ccRow(i)))); }
   const grand=state.items.filter(i=>!i.purchased&&i.category!=='recurring').reduce((s,i)=>s+Number(i.amount||0),0);
   document.getElementById('totalLbl').textContent = grand?('To buy: '+money(grand)):'';
 }
 function renderGroceries(board){
-  let gs=state.groceries.slice(); if(state.hideDone) gs=gs.filter(i=>!i.have);
-  const subs=[]; gs.forEach(g=>{ const s=g.subcategory||'General'; if(subs.indexOf(s)<0) subs.push(s); });
-  subs.sort((a,b)=> (a==='Recipe Specific'?-1:b==='Recipe Specific'?1:a.localeCompare(b)));
-  if(!gs.length){ board.appendChild(cardEl('card','🥦 Groceries','your list',' ',[emptyEl()])); }
-  subs.forEach(s=>{ const rows=gs.filter(g=>(g.subcategory||'General')===s).sort((a,b)=>(a.have-b.have)||(b.sort-a.sort));
-    board.appendChild(cardEl('card', (s==='Recipe Specific'?'🍽 ':'🥦 ')+s, s==='Recipe Specific'?'from recipes':'', String(rows.filter(r=>!r.have).length), rows.map(grocRow))); });
-  document.getElementById('totalLbl').textContent = state.groceries.filter(g=>!g.have).length+' to get';
+  let gs=state.groceries.slice();
+  const ref=gs.filter(g=>(g.subcategory||"")==="Costco v Sams");
+  let active=gs.filter(g=>(g.subcategory||"")!=="Costco v Sams");
+  if(state.hideDone) active=active.filter(i=>!i.have);
+  const has=(g,st)=>String(g.store||"").toLowerCase().indexOf(st)>=0;
+  const sams=active.filter(g=>has(g,"sam")), costco=active.filter(g=>has(g,"costco")), general=active.filter(g=>!has(g,"sam")&&!has(g,"costco"));
+  const srt=(a,b)=>(a.have-b.have)||(b.sort-a.sort), cnt=arr=>String(arr.filter(r=>!r.have).length);
+  board.appendChild(cardEl("card","🥦 Active Grocery","general / Jewel / TJ's / other",cnt(general), general.length?general.sort(srt).map(grocRow):[emptyEl()]));
+  board.appendChild(cardEl("card","🟡 Active — Sam's Club","",cnt(sams), sams.length?sams.sort(srt).map(grocRow):[emptyEl()]));
+  board.appendChild(cardEl("card","🔵 Active — Costco","",cnt(costco), costco.length?costco.sort(srt).map(grocRow):[emptyEl()]));
+  board.appendChild(cardEl("card","📋 Costco vs Sam's","reference — where it's cheaper",String(ref.length), ref.length?ref.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(refRow):[emptyEl()]));
+  document.getElementById("totalLbl").textContent = active.filter(g=>!g.have).length+" to get";
 }
+function refRow(g){ const el=document.createElement("div"); el.className="item";
+  el.innerHTML=`<div class="i-body"><div class="i-name">${escapeHtml(g.name)}</div></div><div class="i-amt" style="color:var(--muted);font-size:12px">${escapeHtml(g.store||"—")}</div>`;
+  el.onclick=()=>openGrocEdit(g); return el; }
+function recipePri(r){ const x=parseInt(r.priority,10); return (x>=1&&x<=3)?x:3; }
 function renderRecipes(board){
   document.getElementById('totalLbl').textContent = state.recipes.length+' recipes';
   if(!state.recipes.length){ board.appendChild(cardEl('card','🍽 Recipes','add via + or Claude',' ',[emptyEl()])); return; }
-  state.recipes.slice().sort((a,b)=>(parseFloat(a.num||999)-parseFloat(b.num||999))||a.name.localeCompare(b.name)).forEach(r=>{
-    const el=document.createElement('section'); el.className='card recipe-card';
-    const sub=[r.bakeType, r.ease&&('Ease '+r.ease), r.protein&&(r.protein+'g protein'), r.calories&&(r.calories+' cal'), r.made&&('✅'+(r.rating?' '+r.rating:''))].filter(Boolean).join(' · ');
-    el.innerHTML=`<div class="rn">${r.num?'<span style="color:var(--muted)">#'+escapeHtml(r.num)+'</span> ':''}${escapeHtml(r.name)}</div><div class="rt">${sub||'tap to view'}</div>`;
-    el.onclick=()=>openRecipe(r); board.appendChild(el);
-  });
+  const sorted=state.recipes.slice().sort((a,b)=> ((a.made?1:0)-(b.made?1:0)) || (recipePri(a)-recipePri(b)) || (parseFloat(a.num||999)-parseFloat(b.num||999)) || a.name.localeCompare(b.name));
+  sorted.forEach(r=> board.appendChild(recipeCard(r)));
+}
+function recipeCard(r){
+  const el=document.createElement('section'); el.className='card recipe-card'+(r.made?' rdone':'');
+  const nm=cleanRecipeName(r.name)||'(unnamed)';
+  const under=[r.bakeType, r.protein&&(r.protein+'g protein'), r.keyIngredients].filter(Boolean).join(' · ');
+  const p=recipePri(r);
+  el.innerHTML=`<div class="rc-top">
+    <div class="rc-main">
+      <div class="rn">${r.num?'<span class="rnum">#'+escapeHtml(r.num)+'</span> ':''}${escapeHtml(nm)}${r.made?`<span class="rc-made">✅${r.rating?' '+escapeHtml(r.rating):''}</span>`:''}${r.ease?`<span class="rc-ease">${escapeHtml(r.ease)}</span>`:''}</div>
+      <div class="rt">${under||'tap to view'}</div>
+    </div>
+    <div class="rc-side">
+      <select class="rc-pri" title="Priority (1 high, 3 low)">${[1,2,3].map(n=>`<option value="${n}" ${p===n?'selected':''}>P${n}</option>`).join('')}</select>
+      <button class="rc-made-btn ${r.made?'on':''}" title="Made?">${r.made?'✓':'○'}</button>
+    </div></div>`;
+  el.querySelector('.rc-main').onclick=()=>openRecipe(r);
+  const sel=el.querySelector('.rc-pri'); sel.onclick=e=>e.stopPropagation(); sel.onchange=e=>{ e.stopPropagation(); updateLocal('recipes',r.id,{priority:e.target.value}); };
+  el.querySelector('.rc-made-btn').onclick=e=>{ e.stopPropagation(); updateLocal('recipes',r.id,{made:!r.made}); };
+  return el;
 }
 function cardEl(cls,title,sub,total,rows){
   const card=document.createElement('section'); card.className=cls;
@@ -305,6 +343,7 @@ function ccRow(it){ const el=document.createElement('div'); el.className='item';
   el.onclick=()=>openItemEdit(it); return el; }
 function grocRow(g){
   const el=document.createElement('div'); el.className='item'+(g.have?' done':''); const meta=[];
+  if(g.store) String(g.store).split(',').forEach(x=>{ x=x.trim(); if(x) meta.push(`<span class="badge">${escapeHtml(x)}</span>`); });
   if(g.recipe) meta.push(`<span class="badge recipe">🍽 ${escapeHtml(g.recipe)}</span>`);
   el.innerHTML=`<button class="check">${g.have?'✓':''}</button>
     <div class="i-body"><div class="i-name">${escapeHtml(g.name)||'(unnamed)'}${g.qty?` <span style="color:var(--muted);font-size:12px">×${escapeHtml(g.qty)}</span>`:''}</div>
@@ -329,8 +368,8 @@ function chip(label,sel,cb){ const b=document.createElement('button'); b.classNa
 function doQuickAdd(){ const inp=document.getElementById('qaInput'); const v=inp.value.trim();
   if(!v){ if(state.view==='shopping') openItemEdit(null); else if(state.view==='groceries') openGrocEdit(null); else openRecipeEdit(null); return; }
   if(state.view==='shopping'){ const p=parseAmount(v); addLocal('items',{name:p.name||v,category:state.cat,amount:p.amount,ccFuture:false,recipient:'',notes:'',cadence:'none',due:'',purchased:false,lastPurchased:'',card:'',url:'',sort:Date.now()}); }
-  else if(state.view==='groceries'){ const p=parseAmount(v); addLocal('groceries',{name:p.name||v,subcategory:state.sub,qty:'',recipe:'',amount:p.amount,have:false,notes:'',sort:Date.now()}); }
-  else { addLocal('recipes',{name:v,ingredients:'',instructions:'',servings:'',tags:'',notes:''}); }
+  else if(state.view==='groceries'){ const p=parseAmount(v); addLocal('groceries',{name:p.name||v,subcategory:state.sub,store:'',qty:'',recipe:'',amount:p.amount,have:false,notes:'',sort:Date.now()}); }
+  else { addLocal('recipes',{name:cleanRecipeName(v),priority:'3',ingredients:'',prep:'',baking:''}); }
   inp.value=''; inp.focus();
 }
 
@@ -404,17 +443,22 @@ function openGrocActions(g){
     else if(a==='del'){ if(confirm('Delete "'+g.name+'"?')){ deleteLocal('groceries',g.id); closeModal(); } } };
 }
 function openGrocEdit(g){
-  const isNew=!g; if(isNew) g={id:null,name:'',subcategory:state.sub,qty:'',recipe:'',amount:'',notes:''};
+  const isNew=!g; if(isNew) g={id:null,name:'',subcategory:state.sub,store:'',qty:'',recipe:'',amount:'',notes:''};
+  let stores=new Set(String(g.store||'').split(',').map(x=>x.trim()).filter(Boolean));
   modal(`<h2>${isNew?'New grocery':'Edit grocery'}</h2>
     <div class="field"><label>Item</label><input id="gName" value="${escapeHtml(g.name)}"/></div>
+    <div class="field"><label>Store — tap to select (multiple ok)</label>
+      <div class="c-grid" id="gStores">${GROC_STORES.map(x=>`<button type="button" class="c-opt${stores.has(x)?' sel':''}" data-s="${escapeHtml(x)}">${escapeHtml(x)}</button>`).join('')}</div></div>
     <div class="row2"><div class="field"><label>Subcategory</label><input id="gSub" list="subs" value="${escapeHtml(g.subcategory||'General')}"/>
-      <datalist id="subs">${GROC_SUBS.map(s=>`<option value="${s}">`).join('')}</datalist></div>
+      <datalist id="subs">${GROC_SUBS.concat(['Costco v Sams']).map(s=>`<option value="${s}">`).join('')}</datalist></div>
       <div class="field"><label>Qty</label><input id="gQty" value="${escapeHtml(g.qty||'')}"/></div></div>
     <div class="row2"><div class="field"><label>For recipe</label><input id="gRec" value="${escapeHtml(g.recipe||'')}"/></div>
       <div class="field"><label>Amount $</label><input id="gAmt" type="number" step="0.01" value="${g.amount!==''?g.amount:''}"/></div></div>
     <div class="field"><label>Notes</label><textarea id="gNotes">${escapeHtml(g.notes||'')}</textarea></div>
     <div class="sheet-actions">${isNew?'':'<button class="btn btn-danger" id="gDel">Delete</button>'}<button class="btn btn-primary" id="gSave">Save</button></div>`);
+  document.querySelectorAll('#gStores .c-opt').forEach(o=>o.onclick=()=>{ const x=o.dataset.s; if(stores.has(x)){stores.delete(x);o.classList.remove('sel');}else{stores.add(x);o.classList.add('sel');} });
   document.getElementById('gSave').onclick=()=>{ const f={ name:document.getElementById('gName').value.trim(), subcategory:document.getElementById('gSub').value.trim()||'General',
+      store:Array.from(stores).join(', '),
       qty:document.getElementById('gQty').value.trim(), recipe:document.getElementById('gRec').value.trim(),
       amount:document.getElementById('gAmt').value!==''?Number(document.getElementById('gAmt').value):'', notes:document.getElementById('gNotes').value };
     if(isNew) addLocal('groceries',Object.assign({have:false,sort:Date.now()},f)); else updateLocal('groceries',g.id,f); closeModal(); };
@@ -424,7 +468,7 @@ function openGrocEdit(g){
 function openRecipe(r){
   const omac=[r.protein&&('P'+r.protein),r.carbs&&('C'+r.carbs),r.fat&&('F'+r.fat),r.calories&&(r.calories+'cal')].filter(Boolean).join(' · ');
   const mmac=[r.modProtein&&('P'+r.modProtein),r.modCarbs&&('C'+r.modCarbs),r.modFat&&('F'+r.modFat),r.modCalories&&(r.modCalories+'cal')].filter(Boolean).join(' · ');
-  modal(`<h2>${r.num?'#'+escapeHtml(r.num)+' ':''}${escapeHtml(r.name)}<span class="sub">${[r.bakeType,r.ease&&('Ease '+r.ease)].filter(Boolean).join(' · ')}</span></h2>
+  modal(`<h2>${r.num?'#'+escapeHtml(r.num)+' ':''}${escapeHtml(cleanRecipeName(r.name))}<span class="sub">${[r.bakeType,r.ease&&('Ease '+r.ease),r.keyIngredients].filter(Boolean).join(' · ')}</span></h2>
     <div class="i-meta" style="margin-bottom:10px">
       ${r.ratio?`<span class="badge">Ratio ${escapeHtml(r.ratio)}</span>`:''}${omac?`<span class="badge">${omac}</span>`:''}
       ${r.modRatio?`<span class="badge cc">Mod ratio ${escapeHtml(r.modRatio)}</span>`:''}${mmac?`<span class="badge cc">${mmac}</span>`:''}
@@ -456,7 +500,9 @@ function openRecipeEdit(r){
     <div class="row2"><div class="field" style="max-width:80px"><label>#</label><input id="rNum" value="${v('num')}"/></div>
       <div class="field"><label>Name</label><input id="rName" value="${v('name')}"/></div></div>
     <div class="row2"><div class="field"><label>Bake type</label><input id="rBake" value="${v('bakeType')}"/></div>
-      <div class="field"><label>Ease</label><input id="rEase" value="${v('ease')}"/></div></div>
+      <div class="field"><label>Ease</label><input id="rEase" value="${v('ease')}" placeholder="Hi/Med/Low"/></div>
+      <div class="field" style="max-width:88px"><label>Priority</label><select id="rPri"><option value="">—</option>${[1,2,3].map(n=>`<option value="${n}" ${String(r.priority)===String(n)?'selected':''}>P${n}</option>`).join('')}</select></div></div>
+    <div class="field"><label>Key ingredients (4 main / base — comma-separated)</label><input id="rKeyIng" value="${v('keyIngredients')}"/></div>
     <label style="display:block;font-size:11px;font-weight:bold;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:6px 0 5px">Original macros (g) — ratio auto-computed</label>
     <div class="row2"><div class="field"><label>P</label><input id="rP" inputmode="decimal" value="${v('protein')}"/></div>
       <div class="field"><label>C</label><input id="rC" inputmode="decimal" value="${v('carbs')}"/></div>
@@ -479,7 +525,8 @@ function openRecipeEdit(r){
     <div class="sheet-actions">${isNew?'':'<button class="btn btn-danger" id="rDel">Delete</button>'}<button class="btn btn-primary" id="rSave">Save</button></div>`);
   document.getElementById('rSave').onclick=()=>{ const g=(id)=>document.getElementById(id).value;
     const P=g('rP').trim(),C=g('rC').trim(),F=g('rF').trim(),MP=g('rMP').trim(),MC=g('rMC').trim(),MF=g('rMF').trim();
-    const f={ num:g('rNum').trim(), name:g('rName').trim(), bakeType:g('rBake').trim(), ease:g('rEase').trim(),
+    const f={ num:g('rNum').trim(), name:cleanRecipeName(g('rName').trim()), bakeType:g('rBake').trim(), ease:g('rEase').trim(),
+      priority:g('rPri').trim(), keyIngredients:g('rKeyIng').trim(),
       protein:P, carbs:C, fat:F, calories:g('rCal').trim(), ratio:ratioOf(P,C,F),
       modProtein:MP, modCarbs:MC, modFat:MF, modCalories:g('rMCal').trim(), modRatio:ratioOf(MP,MC,MF),
       ingredients:g('rIng'), prep:g('rPrep'), baking:g('rBaking'), source:g('rSrc').trim(), keyNotes:g('rKey'),
